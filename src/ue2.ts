@@ -75,8 +75,21 @@ class Drum {
     }
 }
 
+enum OpCode {
+    Load = 0b0000,
+    Add = 0b0001,
+    Sub = 0b0010,
+    Inc = 0b0011,
+    Store = 0b0100,
+    AddLEQ = 0b0101,
+    SubLEQ = 0b0110,
+    IncLEQ = 0b0111,
+    NOP = 0b1000,
+};
+
 class Instruction {
     w: Word = ZERO;
+
 
     get opCode() /*  */ { return (this.w & 0b00000_00000_00000_00000_1111) >> 0; };
     get nextLine() /**/ { return (this.w & 0b11111_00000_00000_00000_0000) >> 19 as LineNo };
@@ -92,16 +105,18 @@ class Instruction {
 
     parse(s: string) {
         //DL:DT OP NL:NT
-        const op = s.split(/[ :]+/).map(s => parseInt(s));
-        this.dataLine = op[0] as LineNo;
-        this.dataTime = op[1] as Time;
-        this.opCode = op[2];
-        this.nextLine = op[3] as LineNo;
-        this.nextTime = op[4] as Time;
+
+        const op = s.split(/[ :]+/);
+
+        this.dataLine = parseInt(op[0]) as LineNo;
+        this.dataTime = parseInt(op[1]) as Time;
+        this.opCode = OpCode[op[2] as keyof typeof OpCode];
+        this.nextLine = parseInt(op[3]) as LineNo;
+        this.nextTime = parseInt(op[4]) as Time;
     }
 
     dump() {
-        console.log(`Instruction: Next ${this.nextLine}:${this.nextTime} Data ${this.dataLine}:${this.dataTime} OpCode ${this.opCode}`);
+        console.log(`Instruction: Next ${this.nextLine}:${this.nextTime} Data ${this.dataLine}:${this.dataTime} OpCode ${OpCode[this.opCode]} ${this.opCode}`);
     }
 }
 
@@ -125,6 +140,8 @@ class UE2 {
         if (this.inFetch) {
             //Fetch Instruction
             if (this.drum.time == this.instruction.nextTime + (this.branch ? 1 : 0) as Time) {
+                console.log("---------------------")
+                console.log(`...done waiting for Time ${this.instruction.nextTime}`);
                 console.log(`Fetching new instruction from ${this.instruction.nextLine}:${this.instruction.nextTime}`);
                 this.instruction.w = this.drum.read(this.instruction.nextLine);
                 this.inFetch = false;
@@ -133,7 +150,7 @@ class UE2 {
         } else {
             //Execute Instruction
             if (this.drum.time == this.instruction.dataTime) {
-                console.log("---------------------")
+                console.log(`...done waiting for Time ${this.instruction.dataTime}`);
                 this.instruction.dump();
                 const oldACC = this.ACC;
                 console.log(`Accumulator: ${oldACC}`)
@@ -185,6 +202,14 @@ class UE2 {
                     }
                 } else {
                     //IO Instruction
+                    /*
+                    If fourth bit is 1, that indicates I/O operations
+                    TIME.1XXX:  1XXX = 8 unique I/O operations
+                                TIME = Device code, like MMIO
+
+                    1000 PL:    ACC <- Parallel from device
+                    1001 PS:    Parallel to device <- ACC
+                    */
                 }
                 console.log(`Accumulator: ${this.ACC == oldACC ? this.ACC : chalk.red(this.ACC)}`);
                 this.drum.dump();
@@ -216,12 +241,12 @@ const code = `
 ; up loading 00.00 into ACC. Maybe opcode 0 should be a NOOP?
 ;
 
-00:00   00:00   8   01:01   ;NOP Goto 01:01
-01:01   23:02   0   01:03   ; ACC <- 23:02
-01:03   23:04   1   01:05   ; ACC += 23:04
-01:05   23:06   4   01:07   ; ACC -> 23:06
+00:00   00:00   NOP     01:01   ;NOP Goto 01:01
+01:01   23:02   Load    01:03   ;ACC <- 23:02
+01:03   23:04   Add     01:05   ;ACC += 23:04
+01:05   23:06   Store   01:07   ;ACC -> 23:06
 
-01:07   00:00   8  01:07   ; Busy nop loop
+01:07   00:00   NOP     01:07   ;NOP Loop
 
 23:02   DATA  37
 23:04   DATA  5
