@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import { workerData } from "worker_threads";
 
 type Word = number & { __brand: 'word' };
 type Time = number & { __brand: 'time' };
@@ -42,14 +43,25 @@ class Drum {
     dumpWrites: Loc[] = [];
     dump() {
         let header = "Line \\ Time: 0";
-        for (let t = 1; t < this.lines[0].length; t++) {
+        let tMax = 0;
+        for (let l = 0; l < this.lines.length; l++) {
+            for (let t = 0; t < this.lines[l].length; t++) {
+                let read = this.dumpReads.some(loc => loc.line == l && loc.time == t);
+                let written = this.dumpWrites.some(loc => loc.line == l && loc.time == t);
+                let n = this.lines[l][t];
+                if (n || read || written)
+                    if (t > tMax)
+                        tMax = t+1;
+            }
+        }
+        for (let t = 1; t < tMax; t++) {
             header += t.toString().padStart(7, " ");
         }
         console.log(header);
         for (let l = 0; l < this.lines.length; l++) {
             let show = false;
             let line = "    " + l.toString().padStart(2, "0") + ": "
-            for (let t = 0; t < this.lines[l].length; t++) {
+            for (let t = 0; t < tMax; t++) {
                 let read = this.dumpReads.some(loc => loc.line == l && loc.time == t);
                 let written = this.dumpWrites.some(loc => loc.line == l && loc.time == t);
                 let n = this.lines[l][t];
@@ -65,7 +77,8 @@ class Drum {
                 else if (n == 0)
                     v = chalk.black(v);
                 line += v;
-                line += chalk.black(",");
+                if (t < tMax - 1)
+                    line += chalk.black(",");
             }
             if (show)
                 console.log(line);
