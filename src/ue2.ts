@@ -20,16 +20,12 @@ class Drum {
     }
 
     read(line: LineNo): Word {
-        //console.log("R", line, this.time, this.lines[line][this.time]);
         this.dumpReads.push({ line, time: this.time });
-
         return this.lines[line][this.time];
     }
 
     write(line: LineNo, value: Word) {
-        //console.log("W", line, this.time, value);
         this.lines[line][this.time] = value;
-
         this.dumpWrites.push({ line, time: this.time });
     }
 
@@ -79,6 +75,32 @@ class Drum {
     }
 }
 
+class Instruction {
+    w: Word = ZERO;
+
+    get opCode() /*  */ { return (this.w & 0b00000_00000_0000_1111) >> 0; };
+    get time() /*    */ { return (this.w & 0b00000_00000_1111_0000) >> 4 as Time };
+    get nextLine() /**/ { return (this.w & 0b00000_11111_0000_0000) >> 8 as LineNo };
+    get dataLine() /**/ { return (this.w & 0b11111_00000_0000_0000) >> 13 as LineNo };
+
+    set opCode(v: number) /*  */ { this.w = (this.w | (v << 0)) as Word; };
+    set time(v: Time) /*      */ { this.w = (this.w | (v << 4)) as Word; };
+    set nextLine(v: LineNo) /**/ { this.w = (this.w | (v << 8)) as Word; };
+    set dataLine(v: LineNo) /**/ { this.w = (this.w | (v << 13)) as Word; };
+
+    parse(s: string) {
+        const op = s.split(".").map(s => parseInt(s));
+        this.dataLine = op[0] as LineNo;
+        this.nextLine = op[1] as LineNo;
+        this.time = op[2] as Time;
+        this.opCode = op[3];
+    }
+
+    dump() {
+        console.log(`Instruction: Next Line ${this.nextLine} Data Line ${this.dataLine} Time: ${this.time} OpCode ${this.opCode}`);
+    }
+}
+
 class UE2 {
 
     //Magnetic Drum Memory
@@ -89,67 +111,67 @@ class UE2 {
 
     //Instruction latching shift register
     nextInstructionShiftRegister: Word = ZERO;
-    instruction: Word = ZERO;
-
-    //Helper functions for accessing certain parts of the instruction
-    get iOpCode() { return (this.instruction & 0b1111); };
-    get iTime() { return (this.instruction & 0b1111_0000) >> 4 as Time };
-    get iNextLine() { return (this.instruction & 0b11111_0000_0000) >> 8 as LineNo };
-    get iDataLine() { return (this.instruction & 0b11111_00000_0000_0000) >> 13 as LineNo };;
+    instruction: Instruction = new Instruction();
 
     step(): void {
         this.drum.step();
 
         //If it is not time, do nothing
-        if (this.drum.time == this.iTime) {
+        if (this.drum.time == this.instruction.time) {
             console.log("---------------------")
-            console.log(`Instruction: Next Line ${this.iNextLine} Data Line ${this.iDataLine} Time: ${this.iTime} OpCode ${this.iOpCode}`);
+            this.instruction.dump();
             const oldACC = this.ACC;
             console.log(`Accumulator: ${oldACC}`)
 
             //Serial load the word at NEXT.TIME (previous instruction) into the IR register.
-            console.log(`Fetching new instruction from ${this.iNextLine}:${this.iTime}`);
-            this.nextInstructionShiftRegister = this.drum.read(this.iNextLine);
-
-            
-
+            console.log(`Fetching new instruction from ${this.instruction.nextLine}:${this.instruction.time}`);
+            this.nextInstructionShiftRegister = this.drum.read(this.instruction.nextLine);
 
 
             //Serial output from ACC to LINE.TIME via specified modifiers.
             //Happens first because the old value of ACC is being written
             //Modifiers TODO
-            if (this.iOpCode == 4) {
-                console.log(`ACC ->  (${oldACC}) ${this.iDataLine}.${this.iTime}`)
-                this.drum.write(this.iDataLine, this.ACC);
+            if (this.instruction.opCode == 4) {
+                console.log(`ACC ->  (${oldACC}) ${this.instruction.dataLine}:${this.instruction.time}`)
+                this.drum.write(this.instruction.dataLine, this.ACC);
             }
 
             //Serial input from LINE.TIME to ACC via specified modifiers.
             //Modifiers TODO
-            if (this.iOpCode == 0) {
-                this.ACC = this.drum.read(this.iDataLine);
-                console.log(`ACC <- ${this.iDataLine}:${this.iTime} (${this.ACC})`)
-            } else if (this.iOpCode == 1) {
-                this.ACC = this.ACC + this.drum.read(this.iDataLine) as Word;
-                console.log(`ACC (${oldACC}) += ${this.iDataLine}:${this.iTime} (${this.drum.read(this.iDataLine)}) = ${this.ACC}`)
+            if (this.instruction.opCode == 0) {
+                this.ACC = this.drum.read(this.instruction.dataLine);
+                console.log(`ACC <- ${this.instruction.dataLine}:${this.instruction.time} (${this.ACC})`)
+            } else if (this.instruction.opCode == 1) {
+                this.ACC = this.ACC + this.drum.read(this.instruction.dataLine) as Word;
+                console.log(`ACC (${oldACC}) += ${this.instruction.dataLine}:${this.instruction.time} (${this.drum.read(this.instruction.dataLine)}) = ${this.ACC}`)
             }
 
-            console.log(`Accumulator: ${this.ACC == oldACC? this.ACC : chalk.red(this.ACC)}`)
+            console.log(`Accumulator: ${this.ACC == oldACC ? this.ACC : chalk.red(this.ACC)}`)
 
             //Latch in the new instruction
             console.log("Latching new instruction");
-            this.instruction = this.nextInstructionShiftRegister;
+            this.instruction.w = this.nextInstructionShiftRegister;
 
             this.drum.dump();
+        }
+    }
+
+    run(steps: number) {
+        let count = 0;
+        while (true) {
+            count++;
+            if (count > steps) {
+                console.log("Stopping after a while");
+                break;
+            }
+            this.step();
         }
     }
 }
 
 let ue2 = new UE2();
 
-/*
- LINE     NEXT    TIME   OPCD
-000000   000000   0000   0000
-*/
+
 const code = `
 ;LOC    DL.NL.TT.OP ; Location  DataLine.NextLine.Time.Op
 
@@ -172,7 +194,16 @@ const code = `
 24:03   DATA  5
 `;
 
-function parse(line: string) {
+
+parseAndPoke(code, ue2.drum);
+
+ue2.run(200);
+
+
+////////////////////////////////////////////////////////////////
+// Code Parsing
+
+function parseLine(line: string) {
 
     const [locS, opS, constant] = line.split(/\s+/);
     const [locLS, locTS] = locS.split(":");
@@ -185,33 +216,25 @@ function parse(line: string) {
         return { loc, word: parseInt(constant) as Word };
     }
 
-    const op = opS.split(".");
-    let w = 0;
-    w |= parseInt(op[0]) << 13; //Data Line
-    w |= parseInt(op[1]) << 8;  //Next Line
-    w |= parseInt(op[2]) << 4;  //Time
-    w |= parseInt(op[3]) << 0;  //OP
+    const i = new Instruction();
+    i.parse(opS);
 
-    return { loc, word: w as Word }
+    return { loc, word: i.w }
 }
 
-let lines = code.split("\n");
-console.log(chalk.dim(chalk.yellow(code)))
-lines
-    .map(s => s.replace(/;.*/, "")) //remove comments
-    .map(s => s.trim()) //Trim Whitespace
-    .filter(s => s.length)  //Remove blanks
-    .map(parse)  //Convert to location, word pairs
-    .forEach(({ loc, word }) => {
-        ue2.drum.poke(loc.line, loc.time, word);
+function parseCode(code: string) {
+    let lines = code.split("\n");
+    console.log(chalk.dim(chalk.yellow(code)))
+    return lines
+        .map(s => s.replace(/;.*/, "")) //remove comments
+        .map(s => s.trim()) //Trim Whitespace
+        .filter(s => s.length)  //Remove blanks
+        .map(parseLine)  //Convert to location, word pairs
+}
+
+function parseAndPoke(code: string, drum: Drum) {
+    parseCode(code).forEach(({ loc, word }) => {
+        drum.poke(loc.line, loc.time, word);
     });
-
-let count = 0;
-while (true) {
-    count++;
-    if (count > 200) {
-        console.log("Stopping after a while");
-        break;
-    }
-    ue2.step();
 }
+
