@@ -78,26 +78,30 @@ class Drum {
 class Instruction {
     w: Word = ZERO;
 
-    get opCode() /*  */ { return (this.w & 0b00000_00000_0000_1111) >> 0; };
-    get time() /*    */ { return (this.w & 0b00000_00000_1111_0000) >> 4 as Time };
-    get nextLine() /**/ { return (this.w & 0b00000_11111_0000_0000) >> 8 as LineNo };
-    get dataLine() /**/ { return (this.w & 0b11111_00000_0000_0000) >> 13 as LineNo };
+    get opCode() /*  */ { return (this.w & 0b00000_00000_00000_00000_1111) >> 0; };
+    get nextLine() /**/ { return (this.w & 0b11111_00000_00000_00000_0000) >> 19 as LineNo };
+    get nextTime() /**/ { return (this.w & 0b00000_11111_00000_00000_0000) >> 14 as Time };
+    get dataLine() /**/ { return (this.w & 0b00000_00000_11111_00000_0000) >> 9 as LineNo };
+    get dataTime() /**/ { return (this.w & 0b00000_00000_00000_11111_0000) >> 4 as Time };
 
     set opCode(v: number) /*  */ { this.w = (this.w | (v << 0)) as Word; };
-    set time(v: Time) /*      */ { this.w = (this.w | (v << 4)) as Word; };
-    set nextLine(v: LineNo) /**/ { this.w = (this.w | (v << 8)) as Word; };
-    set dataLine(v: LineNo) /**/ { this.w = (this.w | (v << 13)) as Word; };
+    set nextLine(v: LineNo) /**/ { this.w = (this.w | (v << 19)) as Word; };
+    set nextTime(v: Time) /*  */ { this.w = (this.w | (v << 14)) as Word; };
+    set dataLine(v: LineNo) /**/ { this.w = (this.w | (v << 9)) as Word; };
+    set dataTime(v: Time) /*  */ { this.w = (this.w | (v << 4)) as Word; };
 
     parse(s: string) {
-        const op = s.split(".").map(s => parseInt(s));
+        //DL:DT OP NL:NT
+        const op = s.split(/[ :]+/).map(s => parseInt(s));
         this.dataLine = op[0] as LineNo;
-        this.nextLine = op[1] as LineNo;
-        this.time = op[2] as Time;
-        this.opCode = op[3];
+        this.dataTime = op[1] as Time;
+        this.opCode = op[2];
+        this.nextLine = op[3] as LineNo;
+        this.nextTime = op[4] as Time;
     }
 
     dump() {
-        console.log(`Instruction: Next Line ${this.nextLine} Data Line ${this.dataLine} Time: ${this.time} OpCode ${this.opCode}`);
+        console.log(`Instruction: Next ${this.nextLine}:${this.nextTime} Data ${this.dataLine}:${this.dataTime} OpCode ${this.opCode}`);
     }
 }
 
@@ -109,52 +113,86 @@ class UE2 {
     //Full word normal registers, stored on drum
     ACC: Word = ZERO;
 
-    //Instruction latching shift register
-    nextInstructionShiftRegister: Word = ZERO;
     instruction: Instruction = new Instruction();
+
+    branch: boolean = false;
+
+    inFetch = true;
 
     step(): void {
         this.drum.step();
 
-        //If it is not time, do nothing
-        if (this.drum.time == this.instruction.time) {
-            console.log("---------------------")
-            this.instruction.dump();
-            const oldACC = this.ACC;
-            console.log(`Accumulator: ${oldACC}`)
-
-            //Serial load the word at NEXT.TIME (previous instruction) into the IR register.
-            console.log(`Fetching new instruction from ${this.instruction.nextLine}:${this.instruction.time}`);
-            this.nextInstructionShiftRegister = this.drum.read(this.instruction.nextLine);
-
-
-            //Serial output from ACC to LINE.TIME via specified modifiers.
-            //Happens first because the old value of ACC is being written
-            //Modifiers TODO
-            if (this.instruction.opCode == 4) {
-                console.log(`ACC ->  (${oldACC}) ${this.instruction.dataLine}:${this.instruction.time}`)
-                this.drum.write(this.instruction.dataLine, this.ACC);
+        if (this.inFetch) {
+            //Fetch Instruction
+            if (this.drum.time == this.instruction.nextTime + (this.branch ? 1 : 0) as Time) {
+                console.log(`Fetching new instruction from ${this.instruction.nextLine}:${this.instruction.nextTime}`);
+                this.instruction.w = this.drum.read(this.instruction.nextLine);
+                this.inFetch = false;
+                this.branch = false;
             }
+        } else {
+            //Execute Instruction
+            if (this.drum.time == this.instruction.dataTime) {
+                console.log("---------------------")
+                this.instruction.dump();
+                const oldACC = this.ACC;
+                console.log(`Accumulator: ${oldACC}`)
 
-            //Serial input from LINE.TIME to ACC via specified modifiers.
-            //Modifiers TODO
-            if (this.instruction.opCode == 0) {
-                this.ACC = this.drum.read(this.instruction.dataLine);
-                console.log(`ACC <- ${this.instruction.dataLine}:${this.instruction.time} (${this.ACC})`)
-            } else if (this.instruction.opCode == 1) {
-                this.ACC = this.ACC + this.drum.read(this.instruction.dataLine) as Word;
-                console.log(`ACC (${oldACC}) += ${this.instruction.dataLine}:${this.instruction.time} (${this.drum.read(this.instruction.dataLine)}) = ${this.ACC}`)
+                if ((this.instruction.opCode & 0b1000) == 0) {
+                    //Normal Instruction
+
+                    if (this.instruction.opCode == 0b0100) {
+                        //0100 Store:  LINE.TIME <- ACC
+                        this.drum.write(this.instruction.dataLine, this.ACC);
+                        console.log(`ACC  (${oldACC}) -> ${this.instruction.dataLine}:${this.instruction.dataTime}`)
+                    }
+
+                    if (this.instruction.opCode == 0b0000) {
+                        //0000 Load:   ACC <- LINE.TIME
+                        const dataIn = this.drum.read(this.instruction.dataLine);
+                        this.ACC = dataIn;
+                        console.log(`ACC <- ${this.instruction.dataLine}:${this.instruction.dataTime} (${dataIn})`);
+                    }
+
+
+                    if ((this.instruction.opCode & 0b0011) == 0b0001) {
+                        //0001 Add:    ACC <- LINE.TIME + ACC
+                        //0101 AddLEQ: ACC <- LINE.TIME + ACC, IF ACC = 0 THEN NEXT = NEXT + 1
+                        const dataIn = this.drum.read(this.instruction.dataLine);
+                        this.ACC = this.ACC + this.drum.read(this.instruction.dataLine) as Word;
+                        console.log(`ACC (${oldACC}) += ${this.instruction.dataLine}:${this.instruction.dataTime} (${dataIn}) = ${this.ACC}`);
+                    }
+
+                    if ((this.instruction.opCode & 0b0011) == 0b0010) {
+                        //0010 Sub:    ACC <- LINE.TIME - ACC
+                        //0110 SubLEQ: ACC <- LINE.TIME - ACC, IF ACC = 0 THEN NEXT = NEXT + 1
+                        const dataIn = this.drum.read(this.instruction.dataLine);
+                        this.ACC = this.ACC - this.drum.read(this.instruction.dataLine) as Word;
+                        console.log(`ACC (${oldACC}) -= ${this.instruction.dataLine}:${this.instruction.dataTime} (${dataIn}) = ${this.ACC}`);
+                    }
+
+                    if ((this.instruction.opCode & 0b0011) == 0b0011) {
+                        //0011 Inc:    ACC <- ACC + 1
+                        //0111 IncLEQ: ACC <- LINE.TIME + 1, IF ACC = 0 THEN NEXT = NEXT + 1
+                        const dataIn = this.drum.read(this.instruction.dataLine);
+                        this.ACC = this.ACC + 1 as Word;
+                        console.log(`ACC (${oldACC}) += 1 = ${this.ACC}`);
+                    }
+
+                    if ((this.instruction.opCode & 0b0100)) {
+                        //01xx LEQ IF ACC = 0 THEN NEXT = NEXT + 1
+                        this.branch = this.ACC == 0;
+                    }
+                } else {
+                    //IO Instruction
+                }
+                console.log(`Accumulator: ${this.ACC == oldACC ? this.ACC : chalk.red(this.ACC)}`);
+                this.drum.dump();
+                this.inFetch = true;
             }
-
-            console.log(`Accumulator: ${this.ACC == oldACC ? this.ACC : chalk.red(this.ACC)}`)
-
-            //Latch in the new instruction
-            console.log("Latching new instruction");
-            this.instruction.w = this.nextInstructionShiftRegister;
-
-            this.drum.dump();
         }
     }
+
 
     run(steps: number) {
         let count = 0;
@@ -173,25 +211,20 @@ let ue2 = new UE2();
 
 
 const code = `
-;LOC    DL.NL.TT.OP ; Location  DataLine.NextLine.Time.Op
-
+;LOC    DL:DT OP NL:NT
 ; Startup kinda weird, if IR gets initialized with all zeros it ends
 ; up loading 00.00 into ACC. Maybe opcode 0 should be a NOOP?
+;
 
-00:00   00.01.01.5  ; NOP, goto 01.01
+00:00   00:00   8   01:01   ;NOP Goto 01:01
+01:01   23:02   0   01:03   ; ACC <- 23:02
+01:03   23:04   1   01:05   ; ACC += 23:04
+01:05   23:06   4   01:07   ; ACC -> 23:06
 
-01:01   23.01.02.0  ; Current instruction was loaded from line 1, word 1
-                    ; Value at line 23, word 2 will be loaded into ACC
-                    ; Next instruction is line 1 word 2
-01:02   24.01.03.1  ; Current instruction was loaded from line 1, word 2
-                    ; Value at line 24, word 3 will be added to ACC and stored in ACC
-                    ; Next instruction is line 1 word 3
-01:03   25.02.00.4  ; Current instruction was loaded from line 1, word 3
-                    ; ACC will stored into line 25, word 0
-                    ; Next instruction is line 02, word 0
+01:07   00:00   8  01:07   ; Busy nop loop
 
 23:02   DATA  37
-24:03   DATA  5
+23:04   DATA  5
 `;
 
 
@@ -204,20 +237,22 @@ ue2.run(200);
 // Code Parsing
 
 function parseLine(line: string) {
+    const index = line.indexOf(" ");
+    const first = line.slice(0, index).trim();
+    const rest = line.slice(index + 1).trim();
 
-    const [locS, opS, constant] = line.split(/\s+/);
-    const [locLS, locTS] = locS.split(":");
+    const [locLS, locTS] = first.split(":");
     const loc: Loc = {
         line: parseInt(locLS) as LineNo,
         time: parseInt(locTS) as Time
     };
 
-    if (opS == "DATA") {
-        return { loc, word: parseInt(constant) as Word };
+    if (rest.startsWith("DATA")) {
+        return { loc, word: parseInt(rest.split(/\s+/)[1]) as Word };
     }
 
     const i = new Instruction();
-    i.parse(opS);
+    i.parse(rest);
 
     return { loc, word: i.w }
 }
