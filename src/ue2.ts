@@ -1,5 +1,6 @@
 import chalk from "chalk";
-import { workerData } from "worker_threads";
+import * as readline from 'node:readline/promises';
+import { stdin as input, stdout as output } from 'node:process';
 
 type Word = number & { __brand: 'word' };
 type Time = number & { __brand: 'time' };
@@ -16,6 +17,8 @@ const wONE = ~ZERO as Word;
 class Drum {
     time: Time = 0 as Time;
     lines: Word[][];
+    revolutions = 0;
+
     constructor(lineCount: number, wordCount: number) {
         this.lines = new Array(lineCount).fill(null).map(() => Array(wordCount).fill(0 as Word));
     }
@@ -32,6 +35,8 @@ class Drum {
 
     step() {
         this.time = (this.time + 1) % (this.lines[0].length) as Time;
+        if ( this.time == 0 )
+            this.revolutions++;
     }
 
     //Non-Physical, used for testing
@@ -94,9 +99,9 @@ enum OpCode {
     Sub = 0b0010,
     Inc = 0b0011,
     Store = 0b0100,
-    AddLEQ = 0b0101,
-    SubLEQ = 0b0110,
-    IncLEQ = 0b0111,
+    //AddLEQ = 0b0101,
+    //SubLEQ = 0b0110,
+    //IncLEQ = 0b0111,
 
     In = 0b1000,
     Out = 0b1001
@@ -173,11 +178,13 @@ class UE2 {
 
     inFetch = true;
 
-    step(): void {
+    terminalOutput = "";
+
+    step(): boolean {
         this.drum.step();
 
-        if ( this.halt )
-            return;
+        if (this.halt)
+            return false;
 
         if (this.inFetch) {
             //Fetch Instruction
@@ -186,8 +193,10 @@ class UE2 {
                 console.log(`...done waiting for Time ${this.instruction.nextTime}`);
                 console.log(`Fetching new instruction from ${this.instruction.nextLine}:${this.instruction.nextTime}`);
                 this.instruction.w = this.drum.read(this.instruction.nextLine);
+                                                this.instruction.dump();
                 this.inFetch = false;
                 this.branch = false;
+                return false;
             }
         } else {
             //Execute Instruction
@@ -237,11 +246,12 @@ class UE2 {
                         this.ACC = this.ACC + 1 as Word;
                         console.log(`ACC (${oldACC}) += 1 = ${this.ACC}`);
                     }
-
+/*
                     if ((this.instruction.opCode & 0b0100)) {
                         //01xx LEQ IF ACC = 0 THEN NEXT = NEXT + 1
                         this.branch = this.ACC == 0;
-                    }
+                        console.log(chalk.green("Branch Set XXX"), this.i);
+                    }*/
                 } else {
                     //IO Instruction
                     /*
@@ -254,6 +264,7 @@ class UE2 {
                     */
                     if (this.instruction.device == Device.TX && this.instruction.opCode == OpCode.Out) {
                         console.log("Terminal Write: " + chalk.yellowBright(this.ACC));
+                        this.terminalOutput += " " + this.ACC;
                     }
 
                     if (this.instruction.device == Device.Halt && this.instruction.opCode == OpCode.Out) {
@@ -262,16 +273,22 @@ class UE2 {
                     }
 
                     if (this.instruction.device == Device.Branch && this.instruction.opCode == OpCode.Out) {
-                        this.branch = true;
-                        console.log(chalk.green("Branch Set"));
+                        if ( this.ACC == 0 ){
+                            this.branch = true;
+                            console.log(chalk.green("Branch Set"));
+                        }
                     }
 
                 }
                 console.log(`Accumulator: ${this.ACC == oldACC ? this.ACC : chalk.red(this.ACC)}`);
                 this.drum.dump();
+                console.log("Terminal Contents: " + chalk.yellowBright(this.terminalOutput));
+                console.log("Revolutions: " + this.drum.revolutions);
                 this.inFetch = true;
+                return true;
             }
         }
+        return false;
     }
 
 
@@ -279,7 +296,7 @@ class UE2 {
         let count = 0;
         while (!this.halt) {
             count++;
-            if (count > steps) {
+            if (count == steps) {
                 console.log("Stopping after a while");
                 break;
             }
@@ -292,31 +309,64 @@ let ue2 = new UE2();
 
 
 const code = `
-;LOC    DL:DT OP NL:NT
+;LOC    DATA    OP      NEXT
+;LL:LT  DL:DT   OP      NL:NT
+;LL:LT  Device  IN/OUT  NL:NT
+
 ; Startup kinda weird, if IR gets initialized with all zeros it ends
 ; up loading 00.00 into ACC. Maybe opcode 0 should be a NOOP?
-;
 
-00:00   00:00   NOP     01:01   ;NOP Goto 01:01
-01:01   23:02   Load    01:03   ;ACC <- 23:02
-01:03   23:04   Add     01:05   ;ACC += 23:04
-01:05   23:06   Store   01:07   ;ACC -> 23:06
+;Print the first 5 fibonacci numbers
+;Not minimum access coded!
 
-01:07   TX      Out     01:08   ;Send ACC out to Serial
+                                ;Load and print A
+00:00   02:00   Load    00:01   ;Acc = A
+00:01   TX      Out     00:02   ;Print ACC to terminal
                                 ;Real hardware would only send the
-                                ;first 8 bits
+                                ;first 8 bits perhaps?
 
-01:08   Halt    Out     01:08   ;Halt
+                                ;Calculate C = A + B
+00:02   02:01   Add     00:03   ;   Acc += B
+00:03   02:02   Store   00:04   ;   C = Acc
 
-23:02   DATA  37
-23:04   DATA  5
+
+
+                                ;Move B & C to A & B
+00:04   02:01   Load    00:05   ;   Acc = B
+00:05   02:00   Store   00:06   ;   A = ACC
+00:06   02:02   Load    00:07   ;   Acc = C
+00:07   02:01   Store   00:08   ;   B = Acc
+
+                                ;Count++
+00:08   02:03   Load    00:09   ;   Acc = Count
+00:09   00:04   Inc     00:10   ;   Acc++
+00:10   02:03   Store   00:11   ;   Count = Acc
+
+00:11   Branch  Out     00:12   ;If Acc != 0
+00:12   00:13   Load    00:00   ;   Goto 00:00
+00:13   Halt    Out     00:00   ;Else HALT
+
+02:00   DATA    0               ;A
+02:01   DATA    1               ;B
+02:02   DATA    0               ;C
+02:03   DATA    -10             ;Count
 `;
 
 
 parseAndPoke(code, ue2.drum);
 
-ue2.run(200);
+ue2.run(-1)
 
+//stepByStep();
+
+async function stepByStep() {
+    const rl = readline.createInterface({ input, output });
+    while (!ue2.halt) {
+        while (!ue2.step() && !ue2.halt);
+        await rl.question('Enter to step...');
+    }
+    rl.close();
+}
 
 ////////////////////////////////////////////////////////////////
 // Code Parsing
