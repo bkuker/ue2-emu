@@ -98,8 +98,8 @@ enum OpCode {
     SubLEQ = 0b0110,
     IncLEQ = 0b0111,
 
-    Read = 0b1000,
-    Write = 0b1001
+    In = 0b1000,
+    Out = 0b1001
 };
 
 enum Device {
@@ -252,16 +252,16 @@ class UE2 {
                     1000 PL:    ACC <- Parallel from device
                     1001 PS:    Parallel to device <- ACC
                     */
-                    if (this.instruction.device == Device.TX && this.instruction.opCode == OpCode.Write) {
+                    if (this.instruction.device == Device.TX && this.instruction.opCode == OpCode.Out) {
                         console.log("Terminal Write: " + chalk.yellowBright(this.ACC));
                     }
 
-                    if (this.instruction.device == Device.Halt && this.instruction.opCode == OpCode.Write) {
+                    if (this.instruction.device == Device.Halt && this.instruction.opCode == OpCode.Out) {
                         this.halt = true;
                         console.log(chalk.redBright("HALT"));
                     }
 
-                    if (this.instruction.device == Device.Branch && this.instruction.opCode == OpCode.Write) {
+                    if (this.instruction.device == Device.Branch && this.instruction.opCode == OpCode.Out) {
                         this.branch = true;
                         console.log(chalk.green("Branch Set"));
                     }
@@ -302,11 +302,11 @@ const code = `
 01:03   23:04   Add     01:05   ;ACC += 23:04
 01:05   23:06   Store   01:07   ;ACC -> 23:06
 
-01:07   TX      Write   01:09   ;Send ACC out to Serial
+01:07   TX      Out     01:08   ;Send ACC out to Serial
                                 ;Real hardware would only send the
                                 ;first 8 bits
-01:08   Halt    Write   01:08   ;Halt
-01:09   Halt    Write   01:09   ;Halt
+
+01:08   Halt    Out     01:08   ;Halt
 
 23:02   DATA  37
 23:04   DATA  5
