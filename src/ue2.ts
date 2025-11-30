@@ -51,7 +51,7 @@ class Drum {
                 let n = this.lines[l][t];
                 if (n || read || written)
                     if (t > tMax)
-                        tMax = t+1;
+                        tMax = t + 1;
             }
         }
         for (let t = 1; t < tMax; t++) {
@@ -97,8 +97,16 @@ enum OpCode {
     AddLEQ = 0b0101,
     SubLEQ = 0b0110,
     IncLEQ = 0b0111,
-    NOP = 0b1000,
+
+    Read = 0b1000,
+    Write = 0b1001
 };
+
+enum Device {
+    Branch = 0,
+    Halt = 1,
+    TX = 2
+}
 
 class Instruction {
     w: Word = ZERO;
@@ -116,16 +124,33 @@ class Instruction {
     set dataLine(v: LineNo) /**/ { this.w = (this.w | (v << 9)) as Word; };
     set dataTime(v: Time) /*  */ { this.w = (this.w | (v << 4)) as Word; };
 
+
+    //TODO NOTE IF DEVICE WERE STORED IN LINE THEN TIME COULD ALWAYS WAIT FOR DRUM
+    //EVEN DIFFERENT VOLUME DINGS
+    get device() { return this.dataTime as Device; }
+    set device(v: Device) { this.dataTime = v as Time; }
+
     parse(s: string) {
         //DL:DT OP NL:NT
 
-        const op = s.split(/[ :]+/);
+        const [addrS, opS, nextS] = s.split(/\s+/);
 
-        this.dataLine = parseInt(op[0]) as LineNo;
-        this.dataTime = parseInt(op[1]) as Time;
-        this.opCode = OpCode[op[2] as keyof typeof OpCode];
-        this.nextLine = parseInt(op[3]) as LineNo;
-        this.nextTime = parseInt(op[4]) as Time;
+        this.opCode = OpCode[opS as keyof typeof OpCode];
+
+        if (this.opCode & 0b1000) {
+            this.dataLine = 0 as LineNo; //IGNORED
+            this.device = Device[addrS as keyof typeof Device];
+        } else {
+            const addr = addrS.split(":");
+            this.dataLine = parseInt(addr[0]) as LineNo;
+            this.dataTime = parseInt(addr[1]) as Time;
+        }
+
+        const next = nextS.split(":");
+        this.nextLine = parseInt(next[0]) as LineNo;
+        this.nextTime = parseInt(next[1]) as Time;
+
+        this.dump();
     }
 
     dump() {
@@ -144,11 +169,15 @@ class UE2 {
     instruction: Instruction = new Instruction();
 
     branch: boolean = false;
+    halt: boolean = false;
 
     inFetch = true;
 
     step(): void {
         this.drum.step();
+
+        if ( this.halt )
+            return;
 
         if (this.inFetch) {
             //Fetch Instruction
@@ -171,13 +200,13 @@ class UE2 {
                 if ((this.instruction.opCode & 0b1000) == 0) {
                     //Normal Instruction
 
-                    if (this.instruction.opCode == 0b0100) {
+                    if (this.instruction.opCode == OpCode.Store) {
                         //0100 Store:  LINE.TIME <- ACC
                         this.drum.write(this.instruction.dataLine, this.ACC);
                         console.log(`ACC  (${oldACC}) -> ${this.instruction.dataLine}:${this.instruction.dataTime}`)
                     }
 
-                    if (this.instruction.opCode == 0b0000) {
+                    if (this.instruction.opCode == OpCode.Load) {
                         //0000 Load:   ACC <- LINE.TIME
                         const dataIn = this.drum.read(this.instruction.dataLine);
                         this.ACC = dataIn;
@@ -185,7 +214,7 @@ class UE2 {
                     }
 
 
-                    if ((this.instruction.opCode & 0b0011) == 0b0001) {
+                    if ((this.instruction.opCode & 0b0011) == OpCode.Add) {
                         //0001 Add:    ACC <- LINE.TIME + ACC
                         //0101 AddLEQ: ACC <- LINE.TIME + ACC, IF ACC = 0 THEN NEXT = NEXT + 1
                         const dataIn = this.drum.read(this.instruction.dataLine);
@@ -193,7 +222,7 @@ class UE2 {
                         console.log(`ACC (${oldACC}) += ${this.instruction.dataLine}:${this.instruction.dataTime} (${dataIn}) = ${this.ACC}`);
                     }
 
-                    if ((this.instruction.opCode & 0b0011) == 0b0010) {
+                    if ((this.instruction.opCode & 0b0011) == OpCode.Sub) {
                         //0010 Sub:    ACC <- LINE.TIME - ACC
                         //0110 SubLEQ: ACC <- LINE.TIME - ACC, IF ACC = 0 THEN NEXT = NEXT + 1
                         const dataIn = this.drum.read(this.instruction.dataLine);
@@ -201,7 +230,7 @@ class UE2 {
                         console.log(`ACC (${oldACC}) -= ${this.instruction.dataLine}:${this.instruction.dataTime} (${dataIn}) = ${this.ACC}`);
                     }
 
-                    if ((this.instruction.opCode & 0b0011) == 0b0011) {
+                    if ((this.instruction.opCode & 0b0011) == OpCode.Inc) {
                         //0011 Inc:    ACC <- ACC + 1
                         //0111 IncLEQ: ACC <- LINE.TIME + 1, IF ACC = 0 THEN NEXT = NEXT + 1
                         const dataIn = this.drum.read(this.instruction.dataLine);
@@ -223,6 +252,20 @@ class UE2 {
                     1000 PL:    ACC <- Parallel from device
                     1001 PS:    Parallel to device <- ACC
                     */
+                    if (this.instruction.device == Device.TX && this.instruction.opCode == OpCode.Write) {
+                        console.log("Terminal Write: " + chalk.yellowBright(this.ACC));
+                    }
+
+                    if (this.instruction.device == Device.Halt && this.instruction.opCode == OpCode.Write) {
+                        this.halt = true;
+                        console.log(chalk.redBright("HALT"));
+                    }
+
+                    if (this.instruction.device == Device.Branch && this.instruction.opCode == OpCode.Write) {
+                        this.branch = true;
+                        console.log(chalk.green("Branch Set"));
+                    }
+
                 }
                 console.log(`Accumulator: ${this.ACC == oldACC ? this.ACC : chalk.red(this.ACC)}`);
                 this.drum.dump();
@@ -234,7 +277,7 @@ class UE2 {
 
     run(steps: number) {
         let count = 0;
-        while (true) {
+        while (!this.halt) {
             count++;
             if (count > steps) {
                 console.log("Stopping after a while");
@@ -259,7 +302,11 @@ const code = `
 01:03   23:04   Add     01:05   ;ACC += 23:04
 01:05   23:06   Store   01:07   ;ACC -> 23:06
 
-01:07   00:00   NOP     01:07   ;NOP Loop
+01:07   TX      Write   01:09   ;Send ACC out to Serial
+                                ;Real hardware would only send the
+                                ;first 8 bits
+01:08   Halt    Write   01:08   ;Halt
+01:09   Halt    Write   01:09   ;Halt
 
 23:02   DATA  37
 23:04   DATA  5
