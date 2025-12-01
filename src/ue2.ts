@@ -1,97 +1,12 @@
 import chalk from "chalk";
+import fs from 'node:fs';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
-
-type Word = number & { __brand: 'word' };
-type Time = number & { __brand: 'time' };
-type LineNo = number & { __brand: 'lineNo' };
-
-type Loc = {
-    line: LineNo,
-    time: Time
-};
+import { Word, Time, LineNo, Loc } from "./types";
+import Drum from "./Drum";
+import { parseAndPoke } from "./parser";
 
 const ZERO = 0 as Word;
-const wONE = ~ZERO as Word;
-
-class Drum {
-    time: Time = 0 as Time;
-    lines: Word[][];
-    revolutions = 0;
-
-    constructor(lineCount: number, wordCount: number) {
-        this.lines = new Array(lineCount).fill(null).map(() => Array(wordCount).fill(0 as Word));
-    }
-
-    read(line: LineNo): Word {
-        this.dumpReads.push({ line, time: this.time });
-        return this.lines[line][this.time];
-    }
-
-    write(line: LineNo, value: Word) {
-        this.lines[line][this.time] = value;
-        this.dumpWrites.push({ line, time: this.time });
-    }
-
-    step() {
-        this.time = (this.time + 1) % (this.lines[0].length) as Time;
-        if ( this.time == 0 )
-            this.revolutions++;
-    }
-
-    //Non-Physical, used for testing
-    poke(line: LineNo, time: Time, value: Word) {
-        this.lines[line][time] = value;
-    }
-
-    dumpReads: Loc[] = [];
-    dumpWrites: Loc[] = [];
-    dump() {
-        let header = "Line \\ Time: 0";
-        let tMax = 0;
-        for (let l = 0; l < this.lines.length; l++) {
-            for (let t = 0; t < this.lines[l].length; t++) {
-                let read = this.dumpReads.some(loc => loc.line == l && loc.time == t);
-                let written = this.dumpWrites.some(loc => loc.line == l && loc.time == t);
-                let n = this.lines[l][t];
-                if (n || read || written)
-                    if (t > tMax)
-                        tMax = t + 1;
-            }
-        }
-        for (let t = 1; t < tMax; t++) {
-            header += t.toString().padStart(7, " ");
-        }
-        console.log(header);
-        for (let l = 0; l < this.lines.length; l++) {
-            let show = false;
-            let line = "    " + l.toString().padStart(2, "0") + ": "
-            for (let t = 0; t < tMax; t++) {
-                let read = this.dumpReads.some(loc => loc.line == l && loc.time == t);
-                let written = this.dumpWrites.some(loc => loc.line == l && loc.time == t);
-                let n = this.lines[l][t];
-                if (read || written || n)
-                    show = true;
-                let v = n.toString(16).padStart(6, "0");
-                if (written && read)
-                    v = chalk.magenta(v)
-                else if (written)
-                    v = chalk.red(v);
-                else if (read)
-                    v = chalk.blue(v);
-                else if (n == 0)
-                    v = chalk.black(v);
-                line += v;
-                if (t < tMax - 1)
-                    line += chalk.black(",");
-            }
-            if (show)
-                console.log(line);
-        }
-        this.dumpReads = [];
-        this.dumpWrites = [];
-    }
-}
 
 enum OpCode {
     Load = 0b0000,
@@ -99,9 +14,14 @@ enum OpCode {
     Sub = 0b0010,
     Inc = 0b0011,
     Store = 0b0100,
-    //AddLEQ = 0b0101,
+    //AddLEQ = 0b0101,  Throw these away infavor of Out ACC -> Branch FF
     //SubLEQ = 0b0110,
     //IncLEQ = 0b0111,
+
+    //Rotate..  Rotate ACC one bit in whichever direction is the one it gets shifted in?
+    //              Maybe do it once for every bit set in the operand?
+    //AND..     Bitwise AND
+    //XOR..     Bitwise XOR
 
     In = 0b1000,
     Out = 0b1001
@@ -113,7 +33,7 @@ enum Device {
     TX = 2
 }
 
-class Instruction {
+export class Instruction {
     w: Word = ZERO;
 
 
@@ -308,49 +228,7 @@ class UE2 {
 let ue2 = new UE2();
 
 
-const code = `
-;LOC    DATA    OP      NEXT
-;LL:LT  DL:DT   OP      NL:NT
-;LL:LT  Device  IN/OUT  NL:NT
-
-; Startup kinda weird, if IR gets initialized with all zeros it ends
-; up loading 00.00 into ACC. Maybe opcode 0 should be a NOOP?
-
-;Print the first 5 fibonacci numbers
-;Not minimum access coded!
-
-                                ;Load and print A
-00:00   02:00   Load    00:01   ;Acc = A
-00:01   TX      Out     00:02   ;Print ACC to terminal
-                                ;Real hardware would only send the
-                                ;first 8 bits perhaps?
-
-                                ;Calculate C = A + B
-00:02   02:01   Add     00:03   ;   Acc += B
-00:03   02:02   Store   00:04   ;   C = Acc
-
-
-
-                                ;Move B & C to A & B
-00:04   02:01   Load    00:05   ;   Acc = B
-00:05   02:00   Store   00:06   ;   A = ACC
-00:06   02:02   Load    00:07   ;   Acc = C
-00:07   02:01   Store   00:08   ;   B = Acc
-
-                                ;Count++
-00:08   02:03   Load    00:09   ;   Acc = Count
-00:09   00:04   Inc     00:10   ;   Acc++
-00:10   02:03   Store   00:11   ;   Count = Acc
-
-00:11   Branch  Out     00:12   ;If Acc != 0
-00:12   00:13   Load    00:00   ;   Goto 00:00
-00:13   Halt    Out     00:00   ;Else HALT
-
-02:00   DATA    0               ;A
-02:01   DATA    1               ;B
-02:02   DATA    0               ;C
-02:03   DATA    -10             ;Count
-`;
+const code = fs.readFileSync("src/fib.asm", 'utf-8');
 
 
 parseAndPoke(code, ue2.drum);
@@ -366,45 +244,5 @@ async function stepByStep() {
         await rl.question('Enter to step...');
     }
     rl.close();
-}
-
-////////////////////////////////////////////////////////////////
-// Code Parsing
-
-function parseLine(line: string) {
-    const index = line.indexOf(" ");
-    const first = line.slice(0, index).trim();
-    const rest = line.slice(index + 1).trim();
-
-    const [locLS, locTS] = first.split(":");
-    const loc: Loc = {
-        line: parseInt(locLS) as LineNo,
-        time: parseInt(locTS) as Time
-    };
-
-    if (rest.startsWith("DATA")) {
-        return { loc, word: parseInt(rest.split(/\s+/)[1]) as Word };
-    }
-
-    const i = new Instruction();
-    i.parse(rest);
-
-    return { loc, word: i.w }
-}
-
-function parseCode(code: string) {
-    let lines = code.split("\n");
-    console.log(chalk.dim(chalk.yellow(code)))
-    return lines
-        .map(s => s.replace(/;.*/, "")) //remove comments
-        .map(s => s.trim()) //Trim Whitespace
-        .filter(s => s.length)  //Remove blanks
-        .map(parseLine)  //Convert to location, word pairs
-}
-
-function parseAndPoke(code: string, drum: Drum) {
-    parseCode(code).forEach(({ loc, word }) => {
-        drum.poke(loc.line, loc.time, word);
-    });
 }
 
