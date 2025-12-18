@@ -2,7 +2,7 @@ import chalk from "chalk";
 import fs from 'node:fs';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
-import { Word, Time, LineNo, Loc } from "./types";
+import { Word, Time, LineNo, Loc, wordToFractionalDec, wordToDec, decToWord, wordToString } from "./types";
 import Drum from "./Drum";
 import { parseAndPoke } from "./parser";
 
@@ -124,7 +124,7 @@ class UE2 {
                 console.log(`...done waiting for Time ${this.instruction.dataTime}`);
                 this.instruction.dump();
                 const oldACC = this.ACC;
-                console.log(`Accumulator: ${oldACC}`)
+                console.log(`Accumulator: ${wordToString(this.ACC)}`);
 
                 if ((this.instruction.opCode & 0b1000) == 0) {
                     //Normal Instruction
@@ -147,7 +147,7 @@ class UE2 {
                         //0001 Add:    ACC <- LINE.TIME + ACC
                         //0101 AddLEQ: ACC <- LINE.TIME + ACC, IF ACC = 0 THEN NEXT = NEXT + 1
                         const dataIn = this.drum.read(this.instruction.dataLine);
-                        this.ACC = this.ACC + this.drum.read(this.instruction.dataLine) as Word;
+                        this.ACC = decToWord(wordToDec(this.ACC) + wordToDec(this.drum.read(this.instruction.dataLine))) as Word;
                         console.log(`ACC (${oldACC}) += ${this.instruction.dataLine}:${this.instruction.dataTime} (${dataIn}) = ${this.ACC}`);
                     }
 
@@ -155,7 +155,7 @@ class UE2 {
                         //0010 Sub:    ACC <- LINE.TIME - ACC
                         //0110 SubLEQ: ACC <- LINE.TIME - ACC, IF ACC = 0 THEN NEXT = NEXT + 1
                         const dataIn = this.drum.read(this.instruction.dataLine);
-                        this.ACC = this.ACC - this.drum.read(this.instruction.dataLine) as Word;
+                        this.ACC = decToWord(wordToDec(this.ACC) - wordToDec(this.drum.read(this.instruction.dataLine))) as Word;
                         console.log(`ACC (${oldACC}) -= ${this.instruction.dataLine}:${this.instruction.dataTime} (${dataIn}) = ${this.ACC}`);
                     }
 
@@ -163,7 +163,7 @@ class UE2 {
                         //0011 Inc:    ACC <- ACC + 1
                         //0111 IncLEQ: ACC <- LINE.TIME + 1, IF ACC = 0 THEN NEXT = NEXT + 1
                         const dataIn = this.drum.read(this.instruction.dataLine);
-                        this.ACC = this.ACC + 1 as Word;
+                        this.ACC = decToWord(wordToDec(this.ACC) + 1) as Word;
                         console.log(`ACC (${oldACC}) += 1 = ${this.ACC}`);
                     }
 /*
@@ -183,8 +183,8 @@ class UE2 {
                     1001 PS:    Parallel to device <- ACC
                     */
                     if (this.instruction.device == Device.TX && this.instruction.opCode == OpCode.Out) {
-                        console.log("Terminal Write: " + chalk.yellowBright(this.ACC));
-                        this.terminalOutput += " " + this.ACC;
+                        console.log("Terminal Write: " + chalk.yellowBright(wordToDec(this.ACC)));
+                        this.terminalOutput += " " + wordToDec(this.ACC);
                     }
 
                     if (this.instruction.device == Device.Halt && this.instruction.opCode == OpCode.Out) {
@@ -193,14 +193,15 @@ class UE2 {
                     }
 
                     if (this.instruction.device == Device.Branch && this.instruction.opCode == OpCode.Out) {
-                        if ( this.ACC == 0 ){
+                        if ( wordToDec(this.ACC) == 0 ){
                             this.branch = true;
                             console.log(chalk.green("Branch Set"));
                         }
                     }
 
                 }
-                console.log(`Accumulator: ${this.ACC == oldACC ? this.ACC : chalk.red(this.ACC)}`);
+                
+                console.log(`Accumulator: ${this.ACC == oldACC ? wordToString(this.ACC) : chalk.red(wordToString(this.ACC))}`);
                 this.drum.dump();
                 console.log("Terminal Contents: " + chalk.yellowBright(this.terminalOutput));
                 console.log("Revolutions: " + this.drum.revolutions);

@@ -1,4 +1,4 @@
-import { Word, Time, LineNo, Loc } from "./types";
+import { Word, Time, LineNo, Loc, decToWord, fractionalDecToWord } from "./types";
 import { Instruction } from "./ue2";
 import Drum from "./Drum";
 import chalk from "chalk";
@@ -16,7 +16,9 @@ function parseLine(line: string) {
     };
 
     if (rest.startsWith("DATA")) {
-        return { loc, word: parseInt(rest.split(/\s+/)[1]) as Word };
+        let s = rest.split(/\s+/)[1];
+        let w = decToWord(parseInt(s)); //TODO Other types
+        return { loc, word: w };
     }
 
     const i = new Instruction();
