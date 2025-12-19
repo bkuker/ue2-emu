@@ -28,10 +28,10 @@
 
                                 ;Count++
 00:08   02:03   Load    00:09   ;   Acc = Count
-00:09   00:04   Inc     00:10   ;   Acc++
+00:09   02:04   Add     00:10   ;   Acc++
 00:10   02:03   Store   00:11   ;   Count = Acc
 
-00:11   Branch  Out     00:12   ;If Acc != 0
+00:11   00:00   BEQ     00:12   ;If Acc != 0
 00:12   00:13   Load    00:00   ;   Goto 00:00
 00:13   Halt    Out     00:00   ;Else HALT
 
@@ -39,3 +39,4 @@
 02:01   DATA    1               ;B
 02:02   DATA    0               ;C
 02:03   DATA    -10             ;Count
+02:04   DATA    1               ;1 for increment

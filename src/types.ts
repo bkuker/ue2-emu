@@ -1,8 +1,8 @@
 import assert from "assert";
 import { sign } from "crypto";
 
-const BITS = 24;
-const bitMask = 0b11111111_11111111_11111111;
+export const BITS = 24;
+export const bitMask = 0b11111111_11111111_11111111;
 const magMask = 0b01111111_11111111_11111111;
 const sigMask = 0b10000000_00000000_00000000;
 const msbMask = 0b01000000_00000000_00000000;
