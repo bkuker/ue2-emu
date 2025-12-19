@@ -119,10 +119,10 @@ class UE2 {
 
         if (this.inFetch) {
             //Fetch Instruction
-            if (this.drum.time == this.instruction.nextTime + (this.branch ? 1 : 0) as Time) {
+            if (this.drum.time == (this.instruction.nextTime + (this.branch ? 1 : 0)) as Time) {
                 console.log("---------------------")
-                console.log(`...done waiting for Time ${this.instruction.nextTime}`);
-                console.log(`Fetching new instruction from ${this.instruction.nextLine}:${this.instruction.nextTime}`);
+                console.log(`...done waiting for Time ${this.drum.time}`);
+                console.log(`Fetching new instruction from ${this.instruction.nextLine}:${this.drum.time}`);
                 this.instruction.w = this.drum.read(this.instruction.nextLine);
                 this.instruction.dump();
                 this.inFetch = false;
@@ -172,7 +172,7 @@ class UE2 {
                                     this.ACC = ((this.ACC | (msb ? 1 : 0)) & bitMask) as Word;
                                 }
                                 shift = shift >> 1 as Word;
-                                console.log(chalk.green(`Accumulator: ${wordToString(this.ACC)}`));
+                                //console.log(chalk.green(`Accumulator: ${wordToString(this.ACC)}`));
                             }
                             break;
                         case OpCode.XOR:
@@ -244,7 +244,7 @@ class UE2 {
 let ue2 = new UE2();
 
 
-const code = fs.readFileSync("src/rotateTest.asm", 'utf-8');
+const code = fs.readFileSync("src/mult.asm", 'utf-8');
 
 
 parseAndPoke(code, ue2.drum);

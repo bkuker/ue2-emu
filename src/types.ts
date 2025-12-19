@@ -21,7 +21,7 @@ export function wordToString(w: Word) {
     validateWord(w as Word);
     return `0x${w.toString(16).padStart(6, '0')} ${wordToDec(w)} ${wordToFractionalDec(w).toFixed(8)} 0b${w.toString(2).padStart(24, '0')}`
 }
-
+/*
 console.log(wordToString(decToWord(0)));
 console.log(wordToString(decToWord(1)));
 console.log(wordToString(decToWord(-1)));
@@ -34,6 +34,7 @@ console.log(wordToString(fractionalDecToWord(-0.5)));
 
 console.log(wordToString(fractionalDecToWord(0.125)));
 console.log(wordToString(fractionalDecToWord(-0.125)));
+*/
 
 export function wordToDec(w: Word): number {
     validateWord(w as Word);

@@ -1,4 +1,4 @@
-import { Word, Time, LineNo, Loc, decToWord, fractionalDecToWord } from "./types";
+import { Word, Time, LineNo, Loc, decToWord, validateWord, fractionalDecToWord } from "./types";
 import { Instruction } from "./ue2";
 import Drum from "./Drum";
 import chalk from "chalk";
@@ -16,8 +16,18 @@ function parseLine(line: string) {
     };
 
     if (rest.startsWith("DATA")) {
-        let s = rest.split(/\s+/)[1];
-        let w = decToWord(parseInt(s)); //TODO Other types
+        let s = rest.split(/\s+/)[1].trim();
+        let w : Word;
+        if (s.startsWith("0b")) {
+            w = parseInt(s.substring(2).replaceAll("_", ""), 2) as Word;
+        } else if (s.startsWith("0x")) {
+            w = parseInt(s.substring(2), 16) as Word;
+        } else if (s.startsWith("0.")) {
+            w = fractionalDecToWord(parseFloat(s));
+        } else {
+            w = decToWord(parseInt(s)); //TODO Other types
+        }
+        validateWord(w);
         return { loc, word: w };
     }
 
