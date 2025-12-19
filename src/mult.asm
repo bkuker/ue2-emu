@@ -11,6 +11,7 @@
 ;   }
 ;
 ;   TODO: Code never stops, it just loops adding zero
+;   TODO: Ignores sign bits
 
 ;B = (B >> 1)
 00:00   01:01   Load    00:02   ;Load B into ACC
